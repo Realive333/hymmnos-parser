@@ -1,129 +1,155 @@
 <script>
   import { onMount } from 'svelte';
-  import { translateToHymmnos, translateToJapanese } from './hymmnos_api.js';
+  import { GoogleGenerativeAI } from '@google/generative-ai';
+  import { HYMMNOS_RULES } from './hymmnos_rules.js';
+  import { HYMMNOS_DICTIONARY } from './hymmnos_dictionary.js';
 
-  let apiKey = '';
-  let japaneseText = '';
-  let hymmnosText = '';
-  let isLoadingJpToHm = false;
-  let isLoadingHmToJp = false;
-  let errorMessage = '';
-  let explanation = '';
+  let apiKey = "";
+  let inputText = "";
+  let hymmnosText = "";
+  
+  let isTranslatingToHymmnos = false;
+  let isTranslatingToJapanese = false;
+  let errorMsg = "";
 
   onMount(() => {
-    const saved = localStorage.getItem('gemini_api_key');
-    if (saved) apiKey = saved;
+    const savedKey = localStorage.getItem('gemini_api_key');
+    if (savedKey) apiKey = savedKey;
   });
 
   const saveApiKey = () => {
     localStorage.setItem('gemini_api_key', apiKey);
   };
 
-  const runJpToHymmnos = async () => {
-    if (!japaneseText.trim()) return;
-    if (!apiKey) { errorMessage = 'Gemini APIキーを設定してください。'; return; }
-    isLoadingJpToHm = true;
-    errorMessage = '';
-    explanation = '';
+  const getGeminiClient = () => {
+    if (!apiKey) {
+      errorMsg = "APIキーを入力してください。 (AI Studioから取得)";
+      return null;
+    }
+    errorMsg = "";
+    return new GoogleGenerativeAI(apiKey);
+  };
+
+  const translateToHymmnos = async () => {
+    if (!inputText) return;
+    const ai = getGeminiClient();
+    if (!ai) return;
+
+    isTranslatingToHymmnos = true;
+    errorMsg = "";
+    
     try {
-      const result = await translateToHymmnos(japaneseText, apiKey);
-      if (result) {
-        hymmnosText = result.hymmnos + (result.kana ? '\n' + result.kana : '');
-        explanation = result.explanation || '';
-      }
+      const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const prompt = `あなたはゲーム「アルトネリコ」シリーズに登場する架空言語「ヒュムノス語（Hymmnos）」の専門的な翻訳家です。
+以下の日本語のテキストを、提供された【ヒュムノス語 翻訳ルール】と【ヒュムノス語 辞書】に厳密に従って標準的なヒュムノス語に翻訳してください。
+余計な解説や会話文は一切含めず、翻訳されたヒュムノス語のテキストのみを返してください。
+
+【ヒュムノス語 翻訳ルール】
+${HYMMNOS_RULES}
+
+【ヒュムノス語 辞書 (JSON)】
+${JSON.stringify(HYMMNOS_DICTIONARY, null, 2)}
+
+入力:
+${inputText}`;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      hymmnosText = response.text().trim();
     } catch (err) {
-      errorMessage = err.message;
+      console.error(err);
+      errorMsg = "ヒュムノス語への翻訳中にエラーが発生しました。APIキーまたはネットワークを確認してください。";
     } finally {
-      isLoadingJpToHm = false;
+      isTranslatingToHymmnos = false;
     }
   };
 
-  const runHymmnosToJp = async () => {
-    if (!hymmnosText.trim()) return;
-    if (!apiKey) { errorMessage = 'Gemini APIキーを設定してください。'; return; }
-    isLoadingHmToJp = true;
-    errorMessage = '';
-    explanation = '';
+  const translateToJapanese = async () => {
+    if (!hymmnosText) return;
+    const ai = getGeminiClient();
+    if (!ai) return;
+
+    isTranslatingToJapanese = true;
+    errorMsg = "";
+    
     try {
-      const result = await translateToJapanese(hymmnosText, apiKey);
-      if (result) {
-        japaneseText = result.japanese || '';
-        explanation = result.explanation || '';
-      }
+      const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const prompt = `あなたはゲーム「アルトネリコ」シリーズに登場する架空言語「ヒュムノス語（Hymmnos）」の専門的な翻訳家です。
+以下のヒュムノス語のテキストを、提供された【ヒュムノス語 翻訳ルール】と【ヒュムノス語 辞書】を参照しながら自然な日本語に翻訳してください。
+余計な解説や会話文は一切含めず、翻訳された日本語テキストのみを返してください。
+
+【ヒュムノス語 翻訳ルール】
+${HYMMNOS_RULES}
+
+【ヒュムノス語 辞書 (JSON)】
+${JSON.stringify(HYMMNOS_DICTIONARY, null, 2)}
+
+入力:
+${hymmnosText}`;
+
+      const result = await model.generateContent(prompt);
+      const response = await result.response;
+      inputText = response.text().trim();
     } catch (err) {
-      errorMessage = err.message;
+      console.error(err);
+      errorMsg = "日本語への翻訳中にエラーが発生しました。APIキーまたはネットワークを確認してください。";
     } finally {
-      isLoadingHmToJp = false;
+      isTranslatingToJapanese = false;
     }
   };
 </script>
 
-<div id="app">
-  <div id="center">
-    <h1>Hymmnos Translator</h1>
+<main class="container">
+  <h1>ヒュムノスサーバー v.0.1.α</h1>
+  
+  <div class="settings-panel">
+    <label for="apikey">Gemini API Key:</label>
+    <input 
+      id="apikey" 
+      type="password" 
+      bind:value={apiKey} 
+      on:input={saveApiKey}
+      placeholder="AI Studioから取得したAPIキーを入力" 
+    />
+  </div>
 
-    <div style="margin-bottom: 12px;">
-      <input
-        type="password"
-        bind:value={apiKey}
-        on:change={saveApiKey}
-        placeholder="Gemini API Key"
-        style="padding: 6px 12px; width: 280px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px;"
-      />
-      <small style="display: block; margin-top: 4px; font-size: 12px;">※APIキーはブラウザにのみ保存されます</small>
+  {#if errorMsg}
+    <div class="error-banner">{errorMsg}</div>
+  {/if}
+
+  <div class="translator-panels">
+    <div class="panel input-panel">
+      <h2>日本語 (Japanese)</h2>
+      <textarea
+        bind:value={inputText}
+        placeholder="翻訳したいテキストを入力してください..."
+      ></textarea>
     </div>
 
-    <div style="width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 0;">
+    <div class="translation-actions">
+      <button class="translate-btn" on:click={translateToHymmnos} disabled={isTranslatingToHymmnos || !inputText}>
+        {#if isTranslatingToHymmnos}
+          翻訳中...
+        {:else}
+          ↓ ヒュムノス語へ翻訳
+        {/if}
+      </button>
+      
+      <button class="translate-btn reverse-btn" on:click={translateToJapanese} disabled={isTranslatingToJapanese || !hymmnosText}>
+        {#if isTranslatingToJapanese}
+          翻訳中...
+        {:else}
+          ↑ 日本語へ翻訳
+        {/if}
+      </button>
+    </div>
 
-      <!-- 日本語エリア -->
-      <div>
-        <label style="display: block; font-size: 13px; margin-bottom: 4px; color: var(--text);">日本語</label>
-        <textarea
-          bind:value={japaneseText}
-          placeholder="日本語を入力..."
-          style="width: 100%; height: 140px; padding: 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 15px; font-family: inherit; resize: vertical;"
-        ></textarea>
-      </div>
-
-      <!-- ボタン行 -->
-      <div style="display: flex; gap: 12px; padding: 12px 0; justify-content: center;">
-        <button
-          on:click={runJpToHymmnos}
-          disabled={isLoadingJpToHm || isLoadingHmToJp}
-          style="padding: 8px 20px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px; cursor: pointer;"
-        >
-          {isLoadingJpToHm ? '翻訳中...' : '日本語 → Hymmnos'}
-        </button>
-        <button
-          on:click={runHymmnosToJp}
-          disabled={isLoadingJpToHm || isLoadingHmToJp}
-          style="padding: 8px 20px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px; cursor: pointer;"
-        >
-          {isLoadingHmToJp ? '翻訳中...' : 'Hymmnos → 日本語'}
-        </button>
-      </div>
-
-      <!-- Hymmnosエリア -->
-      <div>
-        <label style="display: block; font-size: 13px; margin-bottom: 4px; color: var(--text);">Hymmnos</label>
-        <textarea
-          bind:value={hymmnosText}
-          placeholder="Hymmnosを入力..."
-          style="width: 100%; height: 140px; padding: 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 15px; font-family: inherit; resize: vertical;"
-        ></textarea>
-      </div>
-
-      <!-- エラー / 解説 -->
-      {#if errorMessage}
-        <p style="color: red; font-size: 13px; margin-top: 8px;">{errorMessage}</p>
-      {/if}
-      {#if explanation}
-        <div style="margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 4px; text-align: left;">
-          <strong style="font-size: 13px; color: var(--text);">解説</strong>
-          <p style="font-size: 13px; line-height: 1.6; margin-top: 6px; white-space: pre-wrap; color: var(--text-h);">{explanation}</p>
-        </div>
-      {/if}
-
+    <div class="panel output-panel">
+      <h2>ヒュムノス語 (Hymmnos)</h2>
+      <textarea
+        bind:value={hymmnosText}
+        placeholder="ヒュムノス語を入力してください..."
+      ></textarea>
     </div>
   </div>
-</div>
+</main>

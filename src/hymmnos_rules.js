@@ -1,4 +1,4 @@
-export const HYMMNOS_RULES = `
+﻿export const HYMMNOS_RULES = `
 === ヒュムノス語（Hymmnos） 文法・語彙ルール ===
 
 ## 1. 言語の基本性質（感情言語）
@@ -113,5 +113,4 @@ export const HYMMNOS_RULES = `
   1. \`firle\` を用いる（例: \`Was yea ra firle herr melenas mea.\` = 私は[彼が私を愛しているの]を感じて嬉しい）
   2. 想音の直後に主語定義を置く（例: \`Was ki ra yorra sarrifis...\` = 貴方たちは捧げる）
   3. 主語を文末に置く倒置（例: \`Fou paks ga hymme faura.\` = 小鳥が謳う）
-
 `;
