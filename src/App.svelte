@@ -152,9 +152,16 @@ ${inputText}
 
     isTranslatingToJapanese = true;
     errorMsg = "";
+    thinkingLog = "";
+    isThinking = false;
 
     try {
-      const model = ai.getGenerativeModel({ model: "gemini-2.5-flash" });
+      const model = ai.getGenerativeModel({
+        model: "gemini-2.5-flash",
+        generationConfig: {
+          thinkingConfig: { includeThoughts: true },
+        },
+      });
       const prompt = `あなたはゲーム「アルトネリコ」シリーズに登場する架空言語「ヒュムノス語（Hymmnos）」の専門的な翻訳家です。
 以下のヒュムノス語のテキストを、提供された【ヒュムノス語 翻訳ルール】と【ヒュムノス語 辞書】を参照しながら自然な日本語に翻訳してください。
 余計な解説や会話文は一切含めず、翻訳された日本語テキストのみを返してください。
@@ -168,15 +175,31 @@ ${JSON.stringify(HYMMNOS_DICTIONARY, null, 2)}
 入力:
 ${hymmnosText}`;
 
-      const result = await model.generateContent(prompt);
-      const response = await result.response;
-      inputText = response.text().trim();
+      const result = await model.generateContentStream(prompt);
+      let responseAccumulator = "";
+
+      for await (const chunk of result.stream) {
+        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+        for (const part of parts) {
+          if (part.thought) {
+            isThinking = true;
+            thinkingLog += part.text ?? "";
+            scrollConsole();
+          } else {
+            isThinking = false;
+            responseAccumulator += part.text ?? "";
+          }
+        }
+      }
+
+      inputText = responseAccumulator.trim();
     } catch (err) {
       console.error(err);
       errorMsg =
         "日本語への翻訳中にエラーが発生しました。APIキーまたはネットワークを確認してください。";
     } finally {
       isTranslatingToJapanese = false;
+      isThinking = false;
     }
   };
 </script>
@@ -255,8 +278,7 @@ ${hymmnosText}`;
               ? "造語（辞書にない自作単語）"
               : "既存（辞書に登録済みの単語）"}
           >
-            <span class="word-badge">{w.isCoinage ? "✨ 造語" : "📖 既存"}</span
-            >
+            <span class="word-badge">{w.isCoinage ? "造語" : "既存"}</span>
             <span class="word-term">{w.word}</span>
             <span class="word-meaning">{w.meaning}</span>
             {#if dialect}
