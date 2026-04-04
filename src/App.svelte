@@ -1,14 +1,15 @@
 <script>
   import { onMount } from 'svelte';
-  import { translateText } from './hymmnos_api.js';
+  import { translateToHymmnos, translateToJapanese } from './hymmnos_api.js';
 
   let apiKey = '';
-  let inputText = '';
-  let translatedData = null;
-  let isLoading = false;
+  let japaneseText = '';
+  let hymmnosText = '';
+  let isLoadingJpToHm = false;
+  let isLoadingHmToJp = false;
   let errorMessage = '';
+  let explanation = '';
 
-  // APIキーをローカルストレージに保存/復元
   onMount(() => {
     const saved = localStorage.getItem('gemini_api_key');
     if (saved) apiKey = saved;
@@ -18,70 +19,111 @@
     localStorage.setItem('gemini_api_key', apiKey);
   };
 
-  const executeTranslation = async () => {
-    if (!inputText.trim()) {
-      translatedData = null;
-      errorMessage = '';
-      return;
-    }
-    if (!apiKey) {
-      errorMessage = 'Gemini APIキーを設定してください。';
-      return;
-    }
-
-    isLoading = true;
+  const runJpToHymmnos = async () => {
+    if (!japaneseText.trim()) return;
+    if (!apiKey) { errorMessage = 'Gemini APIキーを設定してください。'; return; }
+    isLoadingJpToHm = true;
     errorMessage = '';
-    
+    explanation = '';
     try {
-      translatedData = await translateText(inputText, apiKey);
+      const result = await translateToHymmnos(japaneseText, apiKey);
+      if (result) {
+        hymmnosText = result.hymmnos + (result.kana ? '\n' + result.kana : '');
+        explanation = result.explanation || '';
+      }
     } catch (err) {
       errorMessage = err.message;
-      translatedData = null;
     } finally {
-      isLoading = false;
+      isLoadingJpToHm = false;
+    }
+  };
+
+  const runHymmnosToJp = async () => {
+    if (!hymmnosText.trim()) return;
+    if (!apiKey) { errorMessage = 'Gemini APIキーを設定してください。'; return; }
+    isLoadingHmToJp = true;
+    errorMessage = '';
+    explanation = '';
+    try {
+      const result = await translateToJapanese(hymmnosText, apiKey);
+      if (result) {
+        japaneseText = result.japanese || '';
+        explanation = result.explanation || '';
+      }
+    } catch (err) {
+      errorMessage = err.message;
+    } finally {
+      isLoadingHmToJp = false;
     }
   };
 </script>
 
-<main id="app">
+<div id="app">
   <div id="center">
     <h1>Hymmnos Translator</h1>
-    
-    <div>
-      <input type="password" bind:value={apiKey} on:change={saveApiKey} placeholder="Gemini API Key を入力" style="padding: 10px; width: 300px; font-size: 16px; margin-bottom: 5px;" />
-      <br/>
-      <small style="color: var(--text);">※APIキーはブラウザにのみ保存されます</small>
+
+    <div style="margin-bottom: 12px;">
+      <input
+        type="password"
+        bind:value={apiKey}
+        on:change={saveApiKey}
+        placeholder="Gemini API Key"
+        style="padding: 6px 12px; width: 280px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px;"
+      />
+      <small style="display: block; margin-top: 4px; font-size: 12px;">※APIキーはブラウザにのみ保存されます</small>
     </div>
 
-    <div style="display: flex; gap: 20px; width: 100%; text-align: left; justify-content: center; flex-wrap: wrap;">
-      <div style="flex: 1; min-width: 300px; border: 1px solid var(--border); padding: 20px; border-radius: 8px; background: var(--social-bg);">
-        <h2>Input (日本語)</h2>
-        <textarea bind:value={inputText} placeholder="例：私は世界を護るために謳う" style="width: 100%; height: 150px; padding: 10px; box-sizing: border-box; font-size: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text); resize: vertical;"></textarea>
-        <button on:click={executeTranslation} disabled={isLoading} style="margin-top: 15px; padding: 10px 20px; font-size: 16px; cursor: pointer; border-radius: 4px; background: var(--accent-bg); color: var(--accent); border: 1px solid var(--accent-border);">
-          {isLoading ? '翻訳中...' : '翻訳する'}
+    <div style="width: 100%; max-width: 700px; display: flex; flex-direction: column; gap: 0;">
+
+      <!-- 日本語エリア -->
+      <div>
+        <label style="display: block; font-size: 13px; margin-bottom: 4px; color: var(--text);">日本語</label>
+        <textarea
+          bind:value={japaneseText}
+          placeholder="日本語を入力..."
+          style="width: 100%; height: 140px; padding: 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 15px; font-family: inherit; resize: vertical;"
+        ></textarea>
+      </div>
+
+      <!-- ボタン行 -->
+      <div style="display: flex; gap: 12px; padding: 12px 0; justify-content: center;">
+        <button
+          on:click={runJpToHymmnos}
+          disabled={isLoadingJpToHm || isLoadingHmToJp}
+          style="padding: 8px 20px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px; cursor: pointer;"
+        >
+          {isLoadingJpToHm ? '翻訳中...' : '日本語 → Hymmnos'}
+        </button>
+        <button
+          on:click={runHymmnosToJp}
+          disabled={isLoadingJpToHm || isLoadingHmToJp}
+          style="padding: 8px 20px; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 14px; cursor: pointer;"
+        >
+          {isLoadingHmToJp ? '翻訳中...' : 'Hymmnos → 日本語'}
         </button>
       </div>
-      
-      <div style="flex: 1; min-width: 300px; border: 1px solid var(--border); padding: 20px; border-radius: 8px; background: var(--social-bg);">
-        <h2>Hymmnos</h2>
-        <div style="min-height: 150px; padding: 10px;">
-          {#if errorMessage}
-            <div style="color: red;">{errorMessage}</div>
-          {:else if isLoading}
-            <div style="color: var(--accent);">翻訳を構築しています...</div>
-          {:else if translatedData}
-            <div>
-              <div style="font-size: 24px; color: var(--accent); font-weight: bold; word-break: break-all;">{translatedData.hymmnos}</div>
-              <div style="font-size: 16px; color: var(--text); margin-bottom: 15px;">{translatedData.kana}</div>
-              <hr style="border: none; border-top: 1px solid var(--border); margin: 15px 0;" />
-              <div>
-                <h3 style="font-size: 16px; margin: 0 0 5px 0;">解説</h3>
-                <p style="font-size: 14px; line-height: 1.5; white-space: pre-wrap; margin: 0;">{translatedData.explanation}</p>
-              </div>
-            </div>
-          {/if}
-        </div>
+
+      <!-- Hymmnosエリア -->
+      <div>
+        <label style="display: block; font-size: 13px; margin-bottom: 4px; color: var(--text);">Hymmnos</label>
+        <textarea
+          bind:value={hymmnosText}
+          placeholder="Hymmnosを入力..."
+          style="width: 100%; height: 140px; padding: 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 4px; background: var(--bg); color: var(--text-h); font-size: 15px; font-family: inherit; resize: vertical;"
+        ></textarea>
       </div>
+
+      <!-- エラー / 解説 -->
+      {#if errorMessage}
+        <p style="color: red; font-size: 13px; margin-top: 8px;">{errorMessage}</p>
+      {/if}
+      {#if explanation}
+        <div style="margin-top: 16px; padding: 12px; border: 1px solid var(--border); border-radius: 4px; text-align: left;">
+          <strong style="font-size: 13px; color: var(--text);">解説</strong>
+          <p style="font-size: 13px; line-height: 1.6; margin-top: 6px; white-space: pre-wrap; color: var(--text-h);">{explanation}</p>
+        </div>
+      {/if}
+
     </div>
   </div>
-</main>
+</div>
