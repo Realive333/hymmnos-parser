@@ -47,16 +47,16 @@ for (let i = 1; i < rows.length; i++) {
     const row = rows[i];
     if (row.length < 4 || !row[0]) continue;
     
-    // Some words have missing POS or we just grab column 3
-    const tags = [];
-    if (row[3]) {
-        tags.push(row[3]);
-    }
-    
+    // CSV column mapping:
+    //  0: word   1: meaning   2: pronunciation   3: tags(品詞)   4: dialect(流派)   5: notes
+    const tags = row[3] ? [row[3]] : [];
+
     dictionary.push({
         word: row[0],
         meaning: row[1],
-        tags: tags
+        pronunciation: row[2] || "",
+        tags: tags,
+        dialect: row[4] || ""
     });
 }
 
