@@ -1,0 +1,9 @@
+node_modules
+.git
+src/*.svelte
+src/main.js
+src/style.css
+*.md
+.gitignore
+update_dict.js
+単語辞書.csv

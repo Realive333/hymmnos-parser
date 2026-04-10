@@ -1,47 +1,70 @@
 # Hymmnos Translator
 
-ヒュムノス語（Hymmnos）の翻訳を行うためのプロトタイプWebアプリケーションです。
+ヒュムノス語（Hymmnos）の翻訳を行うWebアプリケーションです。  
+Google Gemini API を使用し、日本語 ↔ ヒュムノス語のリアルタイム翻訳とAIの思考ログ表示に対応しています。
 
-## 必要な環境
-- **Node.js** (v18以降を推奨・開発環境ではv25.8.2を使用中)
-- パッケージマネージャー: `npm`
+## 🌐 公開URL
 
-## 基本的な使い方・コマンド集
+**https://hymmnos-parser.app**
 
-### 1. 初回セットアップ (パッケージのインストール)
-プロジェクトのクローンやダウンロード直後、または `package.json` が更新されたときに、必要なモジュールをインストールします。
+## アーキテクチャ
+
+```
+[ブラウザ] → [Node.js / Express サーバー] → [Gemini API]
+                ↑
+     APIキーはサーバー側の環境変数としてのみ保持
+     （ブラウザには一切露出しない）
+```
+
+- **フロントエンド**: Svelte + Vite（静的ビルド）
+- **バックエンド**: Node.js / Express（`server.js`）
+- **ホスティング**: Google Cloud Run（東京リージョン: `asia-northeast1`）
+- **APIキー管理**: Google Cloud Secret Manager
+
+---
+
+## ファイル構成
+
+| ファイル | 役割 |
+|---|---|
+| `src/App.svelte` | メインUI（翻訳画面） |
+| `src/style.css` | スタイルシート |
+| `src/hymmnos_rules.js` | ヒュムノス語の文法ルール（プロンプト用） |
+| `src/hymmnos_dictionary.js` | ヒュムノス語辞書データ |
+| `server.js` | Express バックエンドサーバー（Gemini API プロキシ） |
+| `Dockerfile` | Cloud Run デプロイ用 |
+| `単語辞書.csv` | 辞書の元データ（CSVで編集） |
+| `update_dict.js` | CSV → JSへの辞書変換スクリプト |
+
+---
+
+## ローカル開発
+
+### 1. 初回セットアップ
+
 ```bash
 npm install
 ```
 
-### 2. ローカル開発サーバーの起動 (動作確認)
-フロントエンドをローカル環境で動かします。ターミナルに表示されるURL（例: `http://localhost:5173/` 等）をブラウザで開いてアクセスします。
+### 2. バックエンドサーバーを起動（ターミナル①）
+
 ```bash
-npm run dev
+# GEMINI_API_KEY に自分のAPIキーをセットして起動
+$env:GEMINI_API_KEY="YOUR_API_KEY"  # PowerShell
+node server.js
+# → http://localhost:8080 で起動
 ```
 
-### 3. 単語辞書の更新 【重要】
-`単語辞書.csv`（スプレッドシートやExcel等で編集した単語データ）を編集したあと、アプリケーション側（`src/hymmnos_dictionary.js`）へデータを反映させる必須コマンドです。
-**※CSVファイルを保存した後、必ず一度このコマンドを実行してください。**
+### 3. フロントエンド開発サーバーを起動（ターミナル②）
+
+```bash
+npm run dev
+# → http://localhost:5173 でブラウザ確認
+# /api/* へのリクエストは自動的に :8080 に転送される（vite.config.js のプロキシ設定）
+```
+
+### 4. 辞書の更新 （単語辞書.csv を編集後）
+
 ```bash
 node update_dict.js
 ```
-
-### 4. 本番用（公開用）のビルド
-サイトを公開するために、HTML/CSS/JSファイルの最適化・圧縮を行います。実行後、`dist`フォルダに本番用ファイルが出力されます。
-```bash
-npm run build
-```
-
----
-
-## 開発の進め方
-
-1. **画面UIやロジックの変更**
-   - メインとなる画面構造は `src/App.svelte` を編集します。
-   - デザインの色味などは `src/style.css` を編集します。
-   - 変更すると、開発サーバー（`npm run dev`）が自動的にブラウザをリロードして即時反映されます（Hot Module Replacement）。
-
-2. **辞書の追加・管理**
-   - まずは `単語辞書.csv` をCSVエディタ等で編集し保存します。
-   - その後、専用スクリプト `node update_dict.js` を実行し、JSファイル側の辞書配列データを最新状態に同期させます。

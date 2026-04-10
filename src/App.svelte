@@ -1,10 +1,7 @@
 <script>
-  import { onMount, tick } from "svelte";
-  import { GoogleGenerativeAI } from "@google/generative-ai";
-  import { HYMMNOS_RULES } from "./hymmnos_rules.js";
+  import { tick } from "svelte";
   import { HYMMNOS_DICTIONARY } from "./hymmnos_dictionary.js";
 
-  let apiKey = "";
   let inputText = "";
   let hymmnosText = "";
   let wordAnalysis = []; // { word, meaning, isCoinage }
@@ -32,28 +29,44 @@
   let isTranslatingToJapanese = false;
   let errorMsg = "";
 
-  onMount(() => {
-    const savedKey = localStorage.getItem("gemini_api_key");
-    if (savedKey) apiKey = savedKey;
-  });
+  // SSEストリームを読み取る汎用ヘルパー
+  const readSSEStream = async (response, { onThought, onDone, onError }) => {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
 
-  const saveApiKey = () => {
-    localStorage.setItem("gemini_api_key", apiKey);
-  };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
 
-  const getGeminiClient = () => {
-    if (!apiKey) {
-      errorMsg = "APIキーを入力してください。 (AI Studioから取得)";
-      return null;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.type === "thought") {
+            isThinking = true;
+            thinkingLog += data.text;
+            scrollConsole();
+          } else if (data.type === "response") {
+            isThinking = false;
+          } else if (data.type === "done") {
+            onDone?.(data.full);
+          } else if (data.type === "error") {
+            onError?.(data.message);
+          }
+        } catch {
+          // JSON解析エラーは無視
+        }
+      }
     }
-    errorMsg = "";
-    return new GoogleGenerativeAI(apiKey);
   };
 
   const translateToHymmnos = async () => {
     if (!inputText) return;
-    const ai = getGeminiClient();
-    if (!ai) return;
 
     isTranslatingToHymmnos = true;
     errorMsg = "";
@@ -62,83 +75,39 @@
     isThinking = false;
 
     try {
-      // thinkingConfig で思考内容をストリームに含める
-      const model = ai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          thinkingConfig: { includeThoughts: true },
-        },
+      const response = await fetch("/api/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputText }),
       });
 
-      const prompt = `あなたはゲーム「アルトネリコ」シリーズに登場する架空言語「ヒュムノス語（Hymmnos）」の専門的な翻訳家です。
-以下の日本語のテキストを、提供された【ヒュムノス語 翻訳ルール】と【ヒュムノス語 辞書】に厳密に従って標準的なヒュムノス語に翻訳してください。
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
-【ヒュムノス語 翻訳ルール】
-${HYMMNOS_RULES}
-
-【ヒュムノス語 辞書 (JSON)】
-${JSON.stringify(HYMMNOS_DICTIONARY, null, 2)}
-
-入力:
-${inputText}
-
-【出力形式の厳守】
-必ず以下のJSON形式のみを返してください。余計な文章やマークダウンのコードブロック記号は一切付けないこと。
-{
-  "hymmnos": "翻訳されたヒュムノス語テキスト",
-  "words": [
-    {
-      "word": "使用したヒュムノス語の単語",
-      "meaning": "その単語の日本語の意味",
-      "isCoinage": false
-    },
-    {
-      "word": "辞書に存在しなかったため自作した造語",
-      "meaning": "その造語が表す日本語の意味",
-      "isCoinage": true
-    }
-  ]
-}
-想音（Rrha, Was, Wee, Fou, Ma, Nn, au, yea, ra など）はwordsリストに含めなくて良い。`;
-
-      // ストリーミングで取得
-      const result = await model.generateContentStream(prompt);
-      let responseAccumulator = "";
-
-      for await (const chunk of result.stream) {
-        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
-        for (const part of parts) {
-          if (part.thought) {
-            // 思考パーツ → コンソールへ
-            isThinking = true;
-            thinkingLog += part.text ?? "";
-            scrollConsole();
-          } else {
-            // 応答パーツ → 最終JSON用に蓄積
-            isThinking = false;
-            responseAccumulator += part.text ?? "";
+      await readSSEStream(response, {
+        onDone: (full) => {
+          // JSON をパース（コードブロック除去）
+          const stripped = full
+            .trim()
+            .replace(/^```(?:json)?\s*/i, "")
+            .replace(/\s*```$/, "")
+            .trim();
+          try {
+            const parsed = JSON.parse(stripped);
+            hymmnosText = parsed.hymmnos ?? full;
+            wordAnalysis = Array.isArray(parsed.words) ? parsed.words : [];
+          } catch {
+            hymmnosText = full;
+            wordAnalysis = [];
           }
-        }
-      }
-
-      // JSON をパース（コードブロック除去）
-      const stripped = responseAccumulator
-        .trim()
-        .replace(/^```(?:json)?\s*/i, "")
-        .replace(/\s*```$/, "")
-        .trim();
-      try {
-        const parsed = JSON.parse(stripped);
-        hymmnosText = parsed.hymmnos ?? responseAccumulator;
-        wordAnalysis = Array.isArray(parsed.words) ? parsed.words : [];
-      } catch {
-        hymmnosText = responseAccumulator;
-        wordAnalysis = [];
-      }
+        },
+        onError: (msg) => {
+          errorMsg = `ヒュムノス語への翻訳中にエラーが発生しました: ${msg}`;
+        },
+      });
     } catch (err) {
       console.error(err);
       errorMsg =
-        "ヒュムノス語への翻訳中にエラーが発生しました。APIキーまたはネットワークを確認してください。";
+        "ヒュムノス語への翻訳中にエラーが発生しました。ネットワークを確認してください。";
     } finally {
       isTranslatingToHymmnos = false;
       isThinking = false;
@@ -147,8 +116,6 @@ ${inputText}
 
   const translateToJapanese = async () => {
     if (!hymmnosText) return;
-    const ai = getGeminiClient();
-    if (!ai) return;
 
     isTranslatingToJapanese = true;
     errorMsg = "";
@@ -156,47 +123,26 @@ ${inputText}
     isThinking = false;
 
     try {
-      const model = ai.getGenerativeModel({
-        model: "gemini-2.5-flash",
-        generationConfig: {
-          thinkingConfig: { includeThoughts: true },
+      const response = await fetch("/api/translate-back", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ hymmnosText }),
+      });
+
+      if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+      await readSSEStream(response, {
+        onDone: (full) => {
+          inputText = full.trim();
+        },
+        onError: (msg) => {
+          errorMsg = `日本語への翻訳中にエラーが発生しました: ${msg}`;
         },
       });
-      const prompt = `あなたはゲーム「アルトネリコ」シリーズに登場する架空言語「ヒュムノス語（Hymmnos）」の専門的な翻訳家です。
-以下のヒュムノス語のテキストを、提供された【ヒュムノス語 翻訳ルール】と【ヒュムノス語 辞書】を参照しながら自然な日本語に翻訳してください。
-余計な解説や会話文は一切含めず、翻訳された日本語テキストのみを返してください。
-
-【ヒュムノス語 翻訳ルール】
-${HYMMNOS_RULES}
-
-【ヒュムノス語 辞書 (JSON)】
-${JSON.stringify(HYMMNOS_DICTIONARY, null, 2)}
-
-入力:
-${hymmnosText}`;
-
-      const result = await model.generateContentStream(prompt);
-      let responseAccumulator = "";
-
-      for await (const chunk of result.stream) {
-        const parts = chunk.candidates?.[0]?.content?.parts ?? [];
-        for (const part of parts) {
-          if (part.thought) {
-            isThinking = true;
-            thinkingLog += part.text ?? "";
-            scrollConsole();
-          } else {
-            isThinking = false;
-            responseAccumulator += part.text ?? "";
-          }
-        }
-      }
-
-      inputText = responseAccumulator.trim();
     } catch (err) {
       console.error(err);
       errorMsg =
-        "日本語への翻訳中にエラーが発生しました。APIキーまたはネットワークを確認してください。";
+        "日本語への翻訳中にエラーが発生しました。ネットワークを確認してください。";
     } finally {
       isTranslatingToJapanese = false;
       isThinking = false;
@@ -205,18 +151,7 @@ ${hymmnosText}`;
 </script>
 
 <main class="container">
-  <h1>ヒュムノスサーバー v.0.1.α</h1>
-
-  <div class="settings-panel">
-    <label for="apikey">Gemini API Key:</label>
-    <input
-      id="apikey"
-      type="password"
-      bind:value={apiKey}
-      on:input={saveApiKey}
-      placeholder="AI Studioから取得したAPIキーを入力"
-    />
-  </div>
+  <h1>Hymmnos Parser v.0.1β</h1>
 
   {#if errorMsg}
     <div class="error-banner">{errorMsg}</div>
@@ -240,7 +175,7 @@ ${hymmnosText}`;
         {#if isTranslatingToHymmnos}
           翻訳中...
         {:else}
-          ↓ ヒュムノス語へ翻訳
+          ↓ ヒュムノスへ翻訳
         {/if}
       </button>
 
@@ -258,10 +193,10 @@ ${hymmnosText}`;
     </div>
 
     <div class="panel output-panel">
-      <h2>ヒュムノス語 (Hymmnos)</h2>
+      <h2>ヒュムノス</h2>
       <textarea
         bind:value={hymmnosText}
-        placeholder="ヒュムノス語を入力してください..."
+        placeholder="ヒュムノスを入力してください..."
       ></textarea>
     </div>
   </div>
@@ -294,7 +229,7 @@ ${hymmnosText}`;
   <div class="console-panel">
     <div class="console-header">
       <span class="console-title">
-        Hymmnos Server ver.0.1.α Logger
+        Hymmnos Parser ver.0.1β Logger
         {#if isThinking}
           <span class="thinking-dot"></span>
         {/if}
