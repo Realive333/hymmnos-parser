@@ -1,4 +1,4 @@
-FROM node:20-slim
+FROM node:24-slim
 WORKDIR /app
 
 # 依存関係をインストール（devDependencies除外）
@@ -10,7 +10,7 @@ COPY dist/ ./dist/
 
 # サーバー本体とヒュムノス語データ
 COPY server.js ./
-COPY src/hymmnos_rules.js src/hymmnos_dictionary.js ./src/
+COPY src/hymmnos_rules.js src/hymmnos_dictionary.js src/translation_limit.js ./src/
 
 # Cloud Runが使用するポート
 EXPOSE 8080

@@ -13,10 +13,11 @@
 
   // 辞書から流派を逆引きするヘルパー
   const lookupDialect = (word) => {
-    const entry = HYMMNOS_DICTIONARY.find(
-      (d) => d.word.toLowerCase() === word.toLowerCase(),
-    );
-    return entry?.dialect || "";
+    if (typeof word !== "string") return "";
+    return [...new Set(HYMMNOS_DICTIONARY
+      .filter((entry) => entry.word.toLowerCase() === word.toLowerCase())
+      .map((entry) => entry.dialect)
+      .filter(Boolean))].join(" / ");
   };
 
   // コンソールを末尾にスクロール
@@ -30,10 +31,11 @@
   let errorMsg = "";
 
   // SSEストリームを読み取る汎用ヘルパー
-  const readSSEStream = async (response, { onThought, onDone, onError }) => {
+  const readSSEStream = async (response, { onDone, onError }) => {
     const reader = response.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    let completed = false;
 
     while (true) {
       const { done, value } = await reader.read();
@@ -45,24 +47,28 @@
 
       for (const line of lines) {
         if (!line.startsWith("data: ")) continue;
+        let data;
         try {
-          const data = JSON.parse(line.slice(6));
-          if (data.type === "thought") {
-            isThinking = true;
-            thinkingLog += data.text;
-            scrollConsole();
-          } else if (data.type === "response") {
-            isThinking = false;
-          } else if (data.type === "done") {
-            onDone?.(data.full);
-          } else if (data.type === "error") {
-            onError?.(data.message);
-          }
+          data = JSON.parse(line.slice(6));
         } catch {
-          // JSON解析エラーは無視
+          throw new Error("Invalid server event");
+        }
+        if (data.type === "thought") {
+          isThinking = true;
+          thinkingLog += data.text;
+          scrollConsole();
+        } else if (data.type === "response") {
+          isThinking = false;
+        } else if (data.type === "done") {
+          completed = true;
+          onDone?.(data.full);
+        } else if (data.type === "error") {
+          completed = true;
+          onError?.(data.message);
         }
       }
     }
+    if (!completed) throw new Error("Translation stream ended unexpectedly");
   };
 
   const translateToHymmnos = async () => {
@@ -81,6 +87,10 @@
         body: JSON.stringify({ inputText }),
       });
 
+      if (response.status === 429) {
+        errorMsg = "翻訳の利用が集中しています。しばらく待ってから再度お試しください。";
+        return;
+      }
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
       await readSSEStream(response, {
@@ -129,6 +139,10 @@
         body: JSON.stringify({ hymmnosText }),
       });
 
+      if (response.status === 429) {
+        errorMsg = "翻訳の利用が集中しています。しばらく待ってから再度お試しください。";
+        return;
+      }
       if (!response.ok) throw new Error(`Server error: ${response.status}`);
 
       await readSSEStream(response, {
@@ -162,6 +176,7 @@
       <h2>和文</h2>
       <textarea
         bind:value={inputText}
+        maxlength="2000"
         placeholder="翻訳したいテキストを入力してください..."
       ></textarea>
     </div>
@@ -170,7 +185,7 @@
       <button
         class="translate-btn"
         on:click={translateToHymmnos}
-        disabled={isTranslatingToHymmnos || !inputText}
+        disabled={isTranslatingToHymmnos || isTranslatingToJapanese || !inputText}
       >
         {#if isTranslatingToHymmnos}
           翻訳中...
@@ -182,7 +197,7 @@
       <button
         class="translate-btn reverse-btn"
         on:click={translateToJapanese}
-        disabled={isTranslatingToJapanese || !hymmnosText}
+        disabled={isTranslatingToHymmnos || isTranslatingToJapanese || !hymmnosText}
       >
         {#if isTranslatingToJapanese}
           翻訳中...
@@ -196,6 +211,7 @@
       <h2>ヒュムノス</h2>
       <textarea
         bind:value={hymmnosText}
+        maxlength="2000"
         placeholder="ヒュムノスを入力してください..."
       ></textarea>
     </div>
